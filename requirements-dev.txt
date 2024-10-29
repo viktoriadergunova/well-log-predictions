@@ -1,0 +1,4 @@
+# Code formatting and linting
+black # code formatter
+flake8 #linter, checks code style and identify errors
+isort #sorts imports in code
