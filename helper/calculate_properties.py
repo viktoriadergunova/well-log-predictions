@@ -29,7 +29,7 @@ def preprocess_coefficients(coefficients_df):
             coefficients_dict[key] = []
         coefficients_dict[key].append(row)
     
-    # Debug output to ensure all keys are present with correct equations
+    # ensure all keys are present with correct equations
     for key, equations in coefficients_dict.items():
         print(f"Key {key} contains equations: {[eq['Eq'] for eq in equations]}")
     
@@ -46,7 +46,7 @@ def load_logs_data(logs_file):
     
     logs_df.reset_index(drop=True, inplace=True)
     
-    # Initialize output columns for predictions and equations
+    # output columns for predictions and equations in log file
     logs_df["TD"] = None
     logs_df["TC"] = None
     logs_df["SHC"] = None
@@ -54,7 +54,7 @@ def load_logs_data(logs_file):
     logs_df["Equation_TC"] = None
     logs_df["Equation_SHC"] = None
 
-    # Use helper function for column type conversion
+    # data type conversion for log file
     safe_numeric_conversion(
         logs_df, 
         int_columns=["rock_type", "No_logs"], 
@@ -72,7 +72,7 @@ def load_coefficients_data(coefficients_file):
 
     coefficients_df.reset_index(drop=True, inplace=True)
 
-    # Use helper function to convert rock_type and No_logs to integers and coefficients to numeric
+    # data type conversion for coefficient file
     safe_numeric_conversion(
         coefficients_df, 
         int_columns=["rock_type", "No_logs"], 
@@ -86,7 +86,7 @@ def select_best_equation(log_row, matching_equations):
     best_equation = None
     best_valid_count = -1
 
-    # Determine which logs are available in the log row
+    # check which logs are available in log file
     available_logs = {
         "bRHOB": any(col.startswith("RHOB") for col in log_row.index) and pd.notna(log_row.filter(like="RHOB").values[0]),
         "bPHIN": any(col.startswith("PHIN") for col in log_row.index) and pd.notna(log_row.filter(like="PHIN").values[0]),
@@ -95,51 +95,53 @@ def select_best_equation(log_row, matching_equations):
         "bVSH": any(col.startswith("VSH") for col in log_row.index) and pd.notna(log_row.filter(like="VSH").values[0])
     }
 
+    # check if VSH is non negative
+    vsh_value = log_row.filter(like="VSH").values[0] if available_logs["bVSH"] else None
+    rock_type = log_row.get("rock_type", "Unknown")  # Assuming "rock_type" is in log_row
+    if vsh_value is not None and vsh_value < 0:
+        print(f"\033[91mSkipping row due to invalid VSH value: {vsh_value} (must be non-negative). "
+              f"Log row details: {log_row.to_dict()}, Rock type: {rock_type}\033[0m")
+        return None  # Return None immediately if VSH is invalid
+
     print(f"Available logs in log_row (filtered for non-empty): {available_logs}")
-    print(f"Matching equations before filtering by logs:\n{matching_equations}")
 
     for _, eq_row in matching_equations.iterrows():
-        # Count the number of matching logs for this equation
+        # count available log
         match = True
         valid_logs_count = 0
 
         for log_type, is_available in available_logs.items():
-            # Check if the coefficient is non-null and the log is available
+            # coefficient is non null and matching log available
             has_coefficient = pd.notna(eq_row[log_type])
             if has_coefficient:
                 if is_available:
-                    valid_logs_count += 1  # This coefficient matches an available log
+                    valid_logs_count += 1 
                 else:
-                    # The equation expects a log that isn't available, so it's an invalid match
+                    # log isnt availaible? invalid match 
                     match = False
                     break
             elif is_available:
-                # Equation is missing a coefficient for an available log, so it's an invalid match
+                # invalid match, either no rock type, missing coefficient -> VSH: evaporites
                 match = False
                 break
 
-        # Debug output: show valid logs count and match status
-        print(f"Equation {eq_row['Eq']} - Match status: {match}, Valid logs count: {valid_logs_count}")
-        
-        # Only select this equation if it has the highest match score so far
+        # keeps track of best equation
         if match and valid_logs_count > best_valid_count:
             best_equation = eq_row
             best_valid_count = valid_logs_count
-            print(f"New best equation selected: {eq_row['Eq']} with match score {valid_logs_count}")
 
-    # Final debug output to confirm the selected equation
+    # log print: best equation    
     if best_equation is not None:
-        print(f"Best equation chosen: {best_equation['Eq']}")
+        print(f"\033[92mBest equation chosen: {best_equation['Eq']}\033[0m")
     else:
-        print("No suitable equation found for the log row")
+        print(f"\033[91mNo suitable equation found for the log row. Log row details: {log_row.to_dict()}, Rock type: {rock_type}\033[0m")
 
     return best_equation
-
 
 # regression equation
 def calculate_predicted_value(log_row, best_equation):
     intercept = best_equation["Bo"]
-    # partical macth for log column
+    # partical match for log column
     if any(col.startswith("RHOB") for col in log_row.index) and pd.notna(best_equation.get("bRHOB")):
         intercept += best_equation["bRHOB"] * log_row.filter(like="RHOB").values[0]
     if any(col.startswith("PHIN") for col in log_row.index) and pd.notna(best_equation.get("bPHIN")):
@@ -157,39 +159,43 @@ def calculate_predicted_value(log_row, best_equation):
 
 # map the logs to coefficients, sedType and number of logs, calculate predictive values and store the eq number that was used
 def map_and_calculate(logs_df, coefficients_file, property_name):
-    # Load and preprocess coefficients data into a dictionary for fast lookup
+
     coefficients_df = load_coefficients_data(coefficients_file)
     coefficients_dict = preprocess_coefficients(coefficients_df)
     
-    # Do partial match to find columns with "rock"
+    # partial match to find columns with "rock"
     rock_column_log = [col for col in logs_df.columns if "rock" in col.lower()]
     
     if not rock_column_log:
-        print("No columns containing 'rock' found in logs data.")
+        print(f"\033[93mWarning: 'rock_type' is None for row {index}\033[0m")
         return
 
     rock_column_log = rock_column_log[0]
 
-    # Iterate over each row in logs_df
+    # each row in log file
     for index, log_row in logs_df.iterrows():
-        # Retrieve the rock type and No_logs values for the current row
+
+        logs_df.at[index, f"Equation_{property_name}"] = "No equation available"
+        logs_df.at[index, f"{property_name}"] = None  
+
+        # rock type, no logs for current row
         rock_type = log_row.get(rock_column_log)
         no_logs = log_row.get("No_logs")
 
-        # Construct the key for dictionary lookup
         key = (rock_type, no_logs)
         
-        # Get matching equations from the dictionary
+        # matching eq from dict
         matching_equations = coefficients_dict.get(key, [])
 
-        # Debugging output
+        # printing output
         if not matching_equations:
-            print(f"No matching equations found for row {index} with rock_type: {rock_type} and No_logs: {no_logs}")
+            print(f"\033[91mNo matching equations found for row {index} with rock_type: {rock_type} and No_logs: {no_logs}\033[0m")
+            logs_df.at[index, f"Equation_{property_name}"] = "No equation available"
             continue
         else:
-            print(f"Matching equations found for row {index} with rock_type: {rock_type} and No_logs: {no_logs}")
+            print(f"\033[92mMatching equations found for row {index} with rock_type: {rock_type} and No_logs: {no_logs}\033[0m")
 
-        # Find the best equation among the matching ones
+           
         best_equation = select_best_equation(log_row, pd.DataFrame(matching_equations))
 
         if best_equation is not None:
@@ -213,14 +219,14 @@ def process_single_file(logs_file, output_dir, data_folder):
 
     # generate output file path with the same extension as input file
     if logs_file.endswith('.xlsx'):
-        base_name = os.path.basename(logs_file).replace(".xlsx", "_output.xlsx")
+        base_name = os.path.basename(logs_file).replace(".xlsx", "_prediction_output.xlsx")
         output_file_path = os.path.join(output_dir, base_name)
-        # Save the predictions to an Excel file
+        # save excel file
         logs_df.to_excel(output_file_path, index=False)
     elif logs_file.endswith('.csv'):
-        base_name = os.path.basename(logs_file).replace(".csv", "_output.csv")
+        base_name = os.path.basename(logs_file).replace(".csv", "_prediction_output.csv")
         output_file_path = os.path.join(output_dir, base_name)
-        # Save the predictions to a CSV file
+        # save csv file
         logs_df.to_csv(output_file_path, index=False)
 
     print(f"Predictions saved to {output_file_path}")
