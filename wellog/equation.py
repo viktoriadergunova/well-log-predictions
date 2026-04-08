@@ -42,6 +42,7 @@ class Equation:
     intercept: float
     coefficients: Mapping[str, float]
     reference: str
+    rms: float = 0.0
 
     def predict(self, **kwargs: float) -> float:
         """
