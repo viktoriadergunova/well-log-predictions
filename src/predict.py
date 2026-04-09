@@ -38,6 +38,16 @@ def _best_equation(equations: list[Equation]) -> Equation | None:
     return min(equations, key=lambda eq: (eq.rms, -len(eq.required_inputs)))
 
 
+def _best_equation(equations: list[Equation]) -> Equation | None:
+    """
+    Pick the equation with the lowest RMS
+    """
+    if not equations:
+        return None
+    # take lowest rms
+    return min(equations, key=lambda eq: (eq.rms, -len(eq.required_inputs)))
+
+
 def predict_best_fit(df: pd.DataFrame, prop: str) -> pd.DataFrame:
     """
     For each row pick the best applicable equation and return predicted
@@ -59,6 +69,7 @@ def predict_best_fit(df: pd.DataFrame, prop: str) -> pd.DataFrame:
     """
     values = np.full(len(df), np.nan)
     equations_used = np.full(len(df), None, dtype=object)
+    logs_used = np.full(len(df), None, dtype=object)
 
     for rg, rg_df in df.groupby(ROCK_GROUP_COLUMN):
         all_candidates = _equations_for(rg, prop)
@@ -89,18 +100,21 @@ def predict_best_fit(df: pd.DataFrame, prop: str) -> pd.DataFrame:
             if best_eq:
                 # Record ID
                 equations_used[subset.index] = best_eq.id
-                # Vectorized Math
+                logs_used[subset.index] = ", ".join(sorted(best_eq.required_inputs))
+      
                 input_kwargs = {col: subset[col] for col in best_eq.required_inputs}
                 values[subset.index] = best_eq.predict(**input_kwargs)
 
     return pd.DataFrame({
         f"{prop}_best_fit": pd.array(values, dtype="float64"),
         f"{prop}_best_fit_eq": equations_used,
+        f"{prop}_best_fit_logs": logs_used,
     }, index=df.index)
 
 def predict_available_logs(df: pd.DataFrame, prop: str) -> pd.DataFrame:
     values = np.full(len(df), np.nan)
     equations_used = np.full(len(df), None, dtype=object)
+    logs_used = np.full(len(df), None, dtype=object)
 
     available_in_headers = [c for c in KNOWN_LOG_COLUMNS if c in df.columns]
 
@@ -127,7 +141,7 @@ def predict_available_logs(df: pd.DataFrame, prop: str) -> pd.DataFrame:
             if match:
                 # Assign equation ID to the whole block
                 equations_used[subset.index] = match.id
-
+                logs_used[subset.index] = ", ".join(sorted(match.required_inputs))
                 input_kwargs = {col: subset[col] for col in match.required_inputs}
                 values[subset.index] = match.predict(**input_kwargs)
             else:
@@ -139,10 +153,12 @@ def predict_available_logs(df: pd.DataFrame, prop: str) -> pd.DataFrame:
                 )
                 if header_match:
                     equations_used[subset.index] = header_match.id
+                    logs_used[subset.index] = ", ".join(sorted(header_match.required_inputs))
 
     return pd.DataFrame({
         f"{prop}_available_logs": pd.array(values, dtype="float64"),
         f"{prop}_available_logs_eq": equations_used,
+        f"{prop}_available_logs_logs": logs_used,
     }, index=df.index)
 
 def predict(
