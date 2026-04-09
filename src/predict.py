@@ -19,12 +19,8 @@ import pandas as pd
 
 from .equation import Equation
 from .equation_data import EQUATIONS
-from .io import ROCK_GROUP_COLUMN
+from .io import KNOWN_LOG_COLUMNS, ROCK_GROUP_COLUMN
 
-
-# ---------------------------------------------------------------------------
-# Internal helpers
-# ---------------------------------------------------------------------------
 
 def _iter_row_inputs(
     df: pd.DataFrame,
@@ -84,10 +80,6 @@ def _best_equation(equations: list[Equation]) -> Equation | None:
     return min(equations, key=lambda eq: (eq.rms, -len(eq.required_inputs)))
 
 
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
 def predict_best_fit(
     df: pd.DataFrame,
     prop: str,
@@ -123,7 +115,7 @@ def predict_best_fit(
         row_indices = np.where(rock_groups == rg)[0]
         sub_df = df.iloc[row_indices]
 
-        # Pre-compute per-row inputs for every candidate equation.
+        # Pre-compute per-row inputs for every candidate equation
         eq_inputs: dict[str, list[dict | None]] = {
             eq.id: list(_iter_row_inputs(sub_df, eq)) for eq in equations
         }
@@ -146,3 +138,76 @@ def predict_best_fit(
         },
         index=df.index,
     )
+
+def predict_available_logs(
+    df: pd.DataFrame,
+    prop: str,
+) -> pd.DataFrame:
+    
+    values = np.full(len(df), np.nan)
+    equations_used = np.full(len(df), None, dtype=object)
+ 
+    rock_groups = df[ROCK_GROUP_COLUMN]
+    # Identify which logs are present in the dataframe columns
+    available_cols = set(df.columns)
+    available_logs = frozenset(KNOWN_LOG_COLUMNS & available_cols)
+ 
+    for rg in rock_groups.unique():
+        # Find the equation that matches the column headers exactly
+        match = next(
+            (
+                eq for eq in _equations_for(rg, prop)
+                if frozenset(eq.required_inputs) == available_logs
+            ),
+            None,
+        )
+
+        if match is None:
+            continue
+ 
+        row_indices = np.where(rock_groups == rg)[0]
+        sub_df = df.iloc[row_indices]
+ 
+        # Iterate through the rows for this rock group
+        for local_i, global_i in enumerate(row_indices):
+            # We always record the equation ID because it matches the available columns
+            equations_used[global_i] = match.id
+
+            # Get inputs for this specific row
+            inputs = next(
+                inp for j, inp in enumerate(_iter_row_inputs(sub_df, match))
+                if j == local_i
+            )
+            
+            # Only calculate value if there are no NaNs in the row
+            if inputs is not None:
+                values[global_i] = match.predict(**inputs)
+ 
+    return pd.DataFrame(
+        {
+            f"{prop}_available_logs": pd.array(values, dtype="float64"),
+            f"{prop}_available_logs_eq": equations_used,
+        },
+        index=df.index,
+    )
+ 
+def predict(
+    df: pd.DataFrame,
+    prop: str,
+    mode: str = "best_fit",
+) -> pd.DataFrame:
+    _MODES = {
+        "best_fit": predict_best_fit,
+        "available_logs": predict_available_logs,
+    }
+    if mode not in _MODES:
+        raise ValueError(
+            f"Unknown mode {mode!r}. Choose 'best_fit' or 'available_logs'."
+        )
+ 
+    fn = _MODES[mode]
+ 
+    if prop == "all":
+        return pd.concat([fn(df, p) for p in ("tc", "td", "shc")], axis=1)
+ 
+    return fn(df, prop)
