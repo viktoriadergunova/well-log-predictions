@@ -12,39 +12,12 @@ The two main entry points are:
 
 from __future__ import annotations
 
-from typing import Iterator
-
 import numpy as np
 import pandas as pd
 
 from .equation import Equation
 from .equation_data import EQUATIONS
 from .io import KNOWN_LOG_COLUMNS, ROCK_GROUP_COLUMN
-
-
-def _iter_row_inputs(
-    df: pd.DataFrame,
-    equation: Equation,
-) -> Iterator[dict[str, float] | None]:
-    """
-    Per-row input dicts for a single equation.
-
-    ``None`` for rows where any required input is missing or NaN.
-    """
-    required = equation.required_inputs
-
-    missing_cols = [col for col in required if col not in df.columns]
-    if missing_cols:
-        for _ in range(len(df)):
-            yield None
-        return
-
-    subset = df[list(required)]
-    for _, row in subset.iterrows():
-        if row.isna().any():
-            yield None
-        else:
-            yield {col: float(row[col]) for col in required}
 
 
 def _equations_for(rock_group: str, prop: str) -> list[Equation]:
@@ -55,35 +28,17 @@ def _equations_for(rock_group: str, prop: str) -> list[Equation]:
     ]
 
 
-def _applicable_equations(
-    df: pd.DataFrame,
-    rock_group: str,
-    prop: str,
-) -> list[Equation]:
-    """
-    Return equations for *rock_group* and *prop* whose required inputs
-    are all present as columns in *df*.
-    """
-    available_cols = set(df.columns)
-    return [
-        eq for eq in _equations_for(rock_group, prop)
-        if all(col in available_cols for col in eq.required_inputs)
-    ]
-
-
 def _best_equation(equations: list[Equation]) -> Equation | None:
     """
     Pick the equation with the lowest RMS
     """
     if not equations:
         return None
+    # take lowest rms
     return min(equations, key=lambda eq: (eq.rms, -len(eq.required_inputs)))
 
 
-def predict_best_fit(
-    df: pd.DataFrame,
-    prop: str,
-) -> pd.DataFrame:
+def predict_best_fit(df: pd.DataFrame, prop: str) -> pd.DataFrame:
     """
     For each row pick the best applicable equation and return predicted
     values and the equation used per row.
@@ -105,92 +60,91 @@ def predict_best_fit(
     values = np.full(len(df), np.nan)
     equations_used = np.full(len(df), None, dtype=object)
 
-    rock_groups = df[ROCK_GROUP_COLUMN]
-
-    for rg in rock_groups.unique():
-        equations = _applicable_equations(df, rg, prop)
-        if not equations:
+    for rg, rg_df in df.groupby(ROCK_GROUP_COLUMN):
+        all_candidates = _equations_for(rg, prop)
+        if not all_candidates:
             continue
 
-        row_indices = np.where(rock_groups == rg)[0]
-        sub_df = df.iloc[row_indices]
-
-        # Pre-compute per-row inputs for every candidate equation
-        eq_inputs: dict[str, list[dict | None]] = {
-            eq.id: list(_iter_row_inputs(sub_df, eq)) for eq in equations
-        }
-
-        for local_i, global_i in enumerate(row_indices):
-            candidates = [
-                eq for eq in equations
-                if eq_inputs[eq.id][local_i] is not None
-            ]
-            best = _best_equation(candidates)
-            if best is None:
+        relevant_cols = list(set().union(*(eq.required_inputs for eq in all_candidates)))
+        available_cols = [c for c in relevant_cols if c in rg_df.columns]
+        
+        # identifies which rows have the same missing/present data
+        # We group by the presence of data across all relevant log columns
+        for _, subset in rg_df.groupby([rg_df[c].notna() for c in available_cols]):
+            if subset.empty:
                 continue
-            values[global_i] = best.predict(**eq_inputs[best.id][local_i])
-            equations_used[global_i] = best.id
+                
+            # For each unique combination of available logs in this rock group:
+            # Identify logs actually present in this specific subset
+            first_row = subset.iloc[0]
+            present_logs = {col for col in available_cols if pd.notna(first_row[col])}
+            
+            # Filter equations that can work with these logs
+            viable = [
+                eq for eq in all_candidates 
+                if all(req in present_logs for req in eq.required_inputs)
+            ]
+            
+            best_eq = _best_equation(viable)
+            if best_eq:
+                # Record ID
+                equations_used[subset.index] = best_eq.id
+                # Vectorized Math
+                input_kwargs = {col: subset[col] for col in best_eq.required_inputs}
+                values[subset.index] = best_eq.predict(**input_kwargs)
 
-    return pd.DataFrame(
-        {
-            f"{prop}_best_fit": pd.array(values, dtype="float64"),
-            f"{prop}_best_fit_eq": equations_used,
-        },
-        index=df.index,
-    )
+    return pd.DataFrame({
+        f"{prop}_best_fit": pd.array(values, dtype="float64"),
+        f"{prop}_best_fit_eq": equations_used,
+    }, index=df.index)
 
-def predict_available_logs(
-    df: pd.DataFrame,
-    prop: str,
-) -> pd.DataFrame:
-    
+def predict_available_logs(df: pd.DataFrame, prop: str) -> pd.DataFrame:
     values = np.full(len(df), np.nan)
     equations_used = np.full(len(df), None, dtype=object)
- 
-    rock_groups = df[ROCK_GROUP_COLUMN]
-    # Identify which logs are present in the dataframe columns
-    available_cols = set(df.columns)
-    available_logs = frozenset(KNOWN_LOG_COLUMNS & available_cols)
- 
-    for rg in rock_groups.unique():
-        # Find the equation that matches the column headers exactly
-        match = next(
-            (
-                eq for eq in _equations_for(rg, prop)
-                if frozenset(eq.required_inputs) == available_logs
-            ),
-            None,
-        )
 
-        if match is None:
-            continue
- 
-        row_indices = np.where(rock_groups == rg)[0]
-        sub_df = df.iloc[row_indices]
- 
-        # Iterate through the rows for this rock group
-        for local_i, global_i in enumerate(row_indices):
-            # We always record the equation ID because it matches the available columns
-            equations_used[global_i] = match.id
+    available_in_headers = [c for c in KNOWN_LOG_COLUMNS if c in df.columns]
 
-            # Get inputs for this specific row
-            inputs = next(
-                inp for j, inp in enumerate(_iter_row_inputs(sub_df, match))
-                if j == local_i
+    for rg, rg_df in df.groupby(ROCK_GROUP_COLUMN):
+        all_candidates = _equations_for(rg, prop)
+        
+        for _, subset in rg_df.groupby([rg_df[c].notna() for c in available_in_headers]):
+            if subset.empty:
+                continue
+                
+            first_row = subset.iloc[0]
+            present_in_row = frozenset(
+                col for col in available_in_headers if pd.notna(first_row[col])
             )
             
-            # Only calculate value if there are no NaNs in the row
-            if inputs is not None:
-                values[global_i] = match.predict(**inputs)
- 
-    return pd.DataFrame(
-        {
-            f"{prop}_available_logs": pd.array(values, dtype="float64"),
-            f"{prop}_available_logs_eq": equations_used,
-        },
-        index=df.index,
-    )
- 
+            # 4. Identity Match: Find the equation requiring exactly these logs
+            match = next(
+                (
+                    eq for eq in all_candidates 
+                    if frozenset(eq.required_inputs) == present_in_row
+                ),
+                None,
+            )
+            if match:
+                # Assign equation ID to the whole block
+                equations_used[subset.index] = match.id
+
+                input_kwargs = {col: subset[col] for col in match.required_inputs}
+                values[subset.index] = match.predict(**input_kwargs)
+            else:
+
+                header_logs = frozenset(available_in_headers)
+                header_match = next(
+                    (eq for eq in all_candidates if frozenset(eq.required_inputs) == header_logs),
+                    None
+                )
+                if header_match:
+                    equations_used[subset.index] = header_match.id
+
+    return pd.DataFrame({
+        f"{prop}_available_logs": pd.array(values, dtype="float64"),
+        f"{prop}_available_logs_eq": equations_used,
+    }, index=df.index)
+
 def predict(
     df: pd.DataFrame,
     prop: str,
@@ -204,10 +158,10 @@ def predict(
         raise ValueError(
             f"Unknown mode {mode!r}. Choose 'best_fit' or 'available_logs'."
         )
- 
+
     fn = _MODES[mode]
- 
+
     if prop == "all":
         return pd.concat([fn(df, p) for p in ("tc", "td", "shc")], axis=1)
- 
+
     return fn(df, prop)
