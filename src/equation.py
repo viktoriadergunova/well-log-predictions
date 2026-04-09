@@ -3,7 +3,7 @@ Equation dataclass for thermal property regression equations.
 """
 
 from __future__ import annotations
-
+import pandas as pd
 from dataclasses import dataclass
 from typing import Mapping
 
@@ -44,34 +44,15 @@ class Equation:
     reference: str
     rms: float = 0.0
 
-    def predict(self, **kwargs: float) -> float:
-        """
-        Evaluate the regression equation for the given input values.
+    def predict(self, **kwargs: float | pd.Series) -> float | pd.Series:
+            missing = [k for k in self.required_inputs if k not in kwargs]
+            if missing:
+                raise ValueError(
+                    f"Equation {self.id} is missing required inputs: {missing}"
+                )
 
-        Parameters
-        ----------
-        **kwargs : float
-            Well-log values keyed by input name. All names listed in
-            :attr:`required_inputs` must be present.
-
-        Returns
-        -------
-        float
-            Predicted thermal property value.
-
-        Raises
-        ------
-        ValueError
-            If any required input is missing from *kwargs*.
-
-        """
-        missing = [k for k in self.required_inputs if k not in kwargs]
-        if missing:
-            raise ValueError(
-                f"Equation {self.id} is missing required inputs: {missing}"
-            )
-
-        value = self.intercept
-        for k in self.required_inputs:
-            value += self.coefficients.get(k, 0.0) * kwargs[k]
-        return value
+            value = self.intercept
+            for k in self.required_inputs:
+                # If kwargs[k] is a Series, this line calculates all rows at once
+                value += self.coefficients.get(k, 0.0) * kwargs[k]
+            return value
