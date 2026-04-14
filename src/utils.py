@@ -1,7 +1,7 @@
 ROCK_GROUP_MAP = {
-    -3: "clastic",
-    -2: "carbonate",
-    -1: "evaporite",
+    3: "clastics", 
+    2: "carbonate",
+    1: "evaporite",
 }
 
 ROCK_GROUP_REVERSE = {v: k for k, v in ROCK_GROUP_MAP.items()}
