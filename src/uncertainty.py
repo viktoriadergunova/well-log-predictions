@@ -3,7 +3,7 @@ import pandas as pd
 from .equation_data import EQUATIONS
 from .io import ROCK_GROUP_COLUMN
 
-def calculate_eg_spread(
+def calculate_eq_spread(
     df: pd.DataFrame, 
     prop: str, 
     main_pred: pd.Series, 

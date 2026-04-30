@@ -84,7 +84,8 @@ def predict_best_fit(df: pd.DataFrame, prop: str) -> pd.DataFrame:
                 equations_used[subset.index] = best_eq.id
                 input_kwargs = {col: subset[col] for col in best_eq.required_inputs}
                 values[subset.index] = best_eq.predict(**input_kwargs)
-
+    
+    values = np.round(values, 2) # rounding
     main_res = pd.DataFrame({
         f"{prop}_pred": pd.array(values, dtype="float64"),
         f"{prop}_eq": equations_used,
@@ -140,7 +141,8 @@ def predict_available_logs(df: pd.DataFrame, prop: str) -> pd.DataFrame:
                 )
                 if header_match:
                     equations_used[subset.index] = header_match.id
-
+    
+    values = np.round(values, 2) # rounding 
     main_res = pd.DataFrame({
         f"{prop}_pred": pd.array(values, dtype="float64"),
         f"{prop}_eq": equations_used,
