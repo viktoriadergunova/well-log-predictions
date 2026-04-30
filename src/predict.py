@@ -91,8 +91,8 @@ def predict_best_fit(df: pd.DataFrame, prop: str) -> pd.DataFrame:
     }, index=df.index)
 
 
-    from .uncertainty import calculate_uncertainty
-    uncertainty_res = calculate_uncertainty(
+    from .uncertainty import calculate_eq_spread
+    uncertainty_res = calculate_eq_spread(
         df, 
         prop, 
         main_res[f"{prop}_pred"], 

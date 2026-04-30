@@ -3,7 +3,7 @@ import pandas as pd
 from .equation_data import EQUATIONS
 from .io import ROCK_GROUP_COLUMN
 
-def calculate_uncertainty(
+def calculate_eg_spread(
     df: pd.DataFrame, 
     prop: str, 
     main_pred: pd.Series, 
@@ -55,24 +55,11 @@ def calculate_uncertainty(
     max_ids = pred_matrix.idxmax(axis=1)
     ensemble_stats[f"{prop}_max_eq"] = max_ids
     ensemble_stats[f"{prop}_max_logs"] = max_ids.map(eq_to_logs) 
-    # Stats
-    ensemble_stats[f"{prop}_ensemble_mean"] = pred_matrix.mean(axis=1)
-    ensemble_stats[f"{prop}_ensemble_std"] = pred_matrix.std(axis=1).fillna(0)
-
-    rms_map = {eq_id: eq.rms for eq_id, eq in EQUATIONS.items()}
-    row_rms = main_eq_ids.map(rms_map).astype(float)
-    sigma_model = (row_rms / 100.0) * main_pred
-    ensemble_stats[f"{prop}_sigma_model"] = sigma_model
-    ensemble_stats[f"{prop}_lower_95"] = main_pred - (2 * sigma_model)
-    ensemble_stats[f"{prop}_upper_95"] = main_pred + (2 * sigma_model)
-
-
+    
     ordered_cols = [
         f"{prop}_n_equations", f"{prop}_ensemble_logs",
         f"{prop}_ensemble_min", f"{prop}_min_logs", f"{prop}_min_eq",
-        f"{prop}_ensemble_max", f"{prop}_max_logs", f"{prop}_max_eq",
-        f"{prop}_ensemble_mean", f"{prop}_ensemble_std",
-        f"{prop}_sigma_model", f"{prop}_lower_95", f"{prop}_upper_95"
+        f"{prop}_ensemble_max", f"{prop}_max_logs", f"{prop}_max_eq"
     ]
     
     return ensemble_stats[ordered_cols]
