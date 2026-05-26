@@ -141,6 +141,8 @@ def predict_available_logs(df: pd.DataFrame, prop: str) -> pd.DataFrame:
                 )
                 if header_match:
                     equations_used[subset.index] = header_match.id
+                    input_kwargs = {col: subset[col] for col in header_match.required_inputs}
+                    values[subset.index] = header_match.predict(**input_kwargs)
     
     values = np.round(values, 2) # rounding 
     main_res = pd.DataFrame({

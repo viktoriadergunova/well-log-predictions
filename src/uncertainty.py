@@ -30,7 +30,7 @@ def calculate_eq_spread(
             
             pred_matrix.loc[mask, eq.id] = eq.predict(**input_kwargs)
             
-            for idx in df.index[mask]:
+            for idx in np.where(mask)[0]:
                 used_logs_sets[idx].update(req_inputs)
 
 
