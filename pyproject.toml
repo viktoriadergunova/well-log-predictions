@@ -1,0 +1,25 @@
+[project]
+name = "predict-thermal-properties"
+version = "0.1.0" 
+description = "Multivariate regression for thermal conductivity, diffusivity, and heat capacity from well logs"
+requieres-python = ">=3.10"
+dependencies = [
+    "numpy
+    "pandas",
+    "openpyxl",
+    "lasio",
+]
+[project.optional-dependencies]
+dev =[
+    "pytest",
+    "pytest-cov",
+
+]
+
+[tools.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short -v"
+
+[tools.coverage.run]
+source = ["src"]
+omit = ["tests/*]
