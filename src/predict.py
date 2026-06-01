@@ -58,6 +58,7 @@ def predict_best_fit(df: pd.DataFrame, prop: str) -> pd.DataFrame:
     """
     values = np.full(len(df), np.nan)
     equations_used = np.full(len(df), None, dtype=object)
+    logs_used = np.full(len(df), None, dtype=object)
 
     for rg, rg_df in df.groupby(ROCK_GROUP_COLUMN):
         all_candidates = _equations_for(rg, prop)
@@ -105,6 +106,7 @@ def predict_best_fit(df: pd.DataFrame, prop: str) -> pd.DataFrame:
 def predict_available_logs(df: pd.DataFrame, prop: str) -> pd.DataFrame:
     values = np.full(len(df), np.nan)
     equations_used = np.full(len(df), None, dtype=object)
+    logs_used = np.full(len(df), None, dtype=object)
 
     available_in_headers = [c for c in KNOWN_LOG_COLUMNS if c in df.columns]
 
