@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Multivariate regression for thermal conductivity, diffusivity, and heat capacity from well logs"
 requieres-python = ">=3.10"
 dependencies = [
-    "numpy
+    "numpy",
     "pandas",
     "openpyxl",
     "lasio",
@@ -22,4 +22,4 @@ addopts = "--tb=short -v"
 
 [tools.coverage.run]
 source = ["src"]
-omit = ["tests/*]
+omit = ["tests/*"]
