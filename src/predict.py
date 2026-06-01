@@ -37,20 +37,9 @@ def _best_equation(equations: list[Equation]) -> Equation | None:
     # take lowest rms
     return min(equations, key=lambda eq: (eq.rms, -len(eq.required_inputs)))
 
-
-def _best_equation(equations: list[Equation]) -> Equation | None:
-    """
-    Pick the equation with the lowest RMS
-    """
-    if not equations:
-        return None
-    # take lowest rms
-    return min(equations, key=lambda eq: (eq.rms, -len(eq.required_inputs)))
-
-
 def predict_best_fit(df: pd.DataFrame, prop: str) -> pd.DataFrame:
     """
-    For each row pick the best applicable equation and return predicted
+        For each row pick the best applicable equation and return predicted
     values and the equation used per row.
 
     Parameters
@@ -79,18 +68,13 @@ def predict_best_fit(df: pd.DataFrame, prop: str) -> pd.DataFrame:
         relevant_cols = list(set().union(*(eq.required_inputs for eq in all_candidates)))
         available_cols = [c for c in relevant_cols if c in rg_df.columns]
         
-        # identifies which rows have the same missing/present data
-        # We group by the presence of data across all relevant log columns
         for _, subset in rg_df.groupby([rg_df[c].notna() for c in available_cols]):
             if subset.empty:
                 continue
                 
-            # For each unique combination of available logs in this rock group:
-            # Identify logs actually present in this specific subset
             first_row = subset.iloc[0]
             present_logs = {col for col in available_cols if pd.notna(first_row[col])}
             
-            # Filter equations that can work with these logs
             viable = [
                 eq for eq in all_candidates 
                 if all(req in present_logs for req in eq.required_inputs)
@@ -98,18 +82,26 @@ def predict_best_fit(df: pd.DataFrame, prop: str) -> pd.DataFrame:
             
             best_eq = _best_equation(viable)
             if best_eq:
-                # Record ID
                 equations_used[subset.index] = best_eq.id
-                logs_used[subset.index] = ", ".join(sorted(best_eq.required_inputs))
-      
                 input_kwargs = {col: subset[col] for col in best_eq.required_inputs}
                 values[subset.index] = best_eq.predict(**input_kwargs)
-
-    return pd.DataFrame({
-        f"{prop}_best_fit": pd.array(values, dtype="float64"),
-        f"{prop}_best_fit_eq": equations_used,
-        f"{prop}_best_fit_logs": logs_used,
+    
+    values = np.round(values, 2) # rounding
+    main_res = pd.DataFrame({
+        f"{prop}_pred": pd.array(values, dtype="float64"),
+        f"{prop}_eq": equations_used,
     }, index=df.index)
+
+
+    from .uncertainty import calculate_eq_spread
+    uncertainty_res = calculate_eq_spread(
+        df, 
+        prop, 
+        main_res[f"{prop}_pred"], 
+        main_res[f"{prop}_eq"]
+    )
+
+    return pd.concat([main_res, uncertainty_res], axis=1)
 
 def predict_available_logs(df: pd.DataFrame, prop: str) -> pd.DataFrame:
     values = np.full(len(df), np.nan)
@@ -130,7 +122,7 @@ def predict_available_logs(df: pd.DataFrame, prop: str) -> pd.DataFrame:
                 col for col in available_in_headers if pd.notna(first_row[col])
             )
             
-            # 4. Identity Match: Find the equation requiring exactly these logs
+
             match = next(
                 (
                     eq for eq in all_candidates 
@@ -138,14 +130,12 @@ def predict_available_logs(df: pd.DataFrame, prop: str) -> pd.DataFrame:
                 ),
                 None,
             )
+            
             if match:
-                # Assign equation ID to the whole block
                 equations_used[subset.index] = match.id
-                logs_used[subset.index] = ", ".join(sorted(match.required_inputs))
                 input_kwargs = {col: subset[col] for col in match.required_inputs}
                 values[subset.index] = match.predict(**input_kwargs)
             else:
-
                 header_logs = frozenset(available_in_headers)
                 header_match = next(
                     (eq for eq in all_candidates if frozenset(eq.required_inputs) == header_logs),
@@ -153,13 +143,25 @@ def predict_available_logs(df: pd.DataFrame, prop: str) -> pd.DataFrame:
                 )
                 if header_match:
                     equations_used[subset.index] = header_match.id
-                    logs_used[subset.index] = ", ".join(sorted(header_match.required_inputs))
-
-    return pd.DataFrame({
-        f"{prop}_available_logs": pd.array(values, dtype="float64"),
-        f"{prop}_available_logs_eq": equations_used,
-        f"{prop}_available_logs_logs": logs_used,
+                    input_kwargs = {col: subset[col] for col in header_match.required_inputs}
+                    values[subset.index] = header_match.predict(**input_kwargs)
+    
+    values = np.round(values, 2) # rounding 
+    main_res = pd.DataFrame({
+        f"{prop}_pred": pd.array(values, dtype="float64"),
+        f"{prop}_eq": equations_used,
     }, index=df.index)
+
+
+    from .uncertainty import calculate_uncertainty
+    uncertainty_res = calculate_uncertainty(
+        df, 
+        prop, 
+        main_res[f"{prop}_pred"], 
+        main_res[f"{prop}_eq"]
+    )
+
+    return pd.concat([main_res, uncertainty_res], axis=1)
 
 def predict(
     df: pd.DataFrame,
